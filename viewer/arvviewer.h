@@ -1,9 +1,11 @@
-#include <arvviewertypes.h>
+#include <png.h>
+#include "arvviewertypes.h"
 
 G_BEGIN_DECLS
 
 #define ARV_TYPE_VIEWER             (arv_viewer_get_type ())
 #define ARV_IS_VIEWER(obj)          (G_TYPE_CHECK_INSTANCE_TYPE ((obj), ARV_TYPE_VIEWER))
+
 
 GType 			arv_viewer_get_type 		(void);
 

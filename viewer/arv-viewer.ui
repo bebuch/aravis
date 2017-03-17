@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.20.0 
+<!-- Generated with glade 3.20.0
 
-- 
-Copyright (C) 
+-
+Copyright (C)
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -635,7 +635,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
           </packing>
         </child>
         <child>
-          <object class="GtkButton" id="snapshot_button">
+          <object class="GtkToggleButton" id="snapshot_button">
             <property name="use_action_appearance">False</property>
             <property name="visible">True</property>
             <property name="can_focus">True</property>

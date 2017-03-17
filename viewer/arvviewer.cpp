@@ -29,6 +29,15 @@
 #include <math.h>
 #include <memory.h>
 #include <libnotify/notify.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdatomic.h>
+#include <png.h>
+
+void output_png(png_structp png_ptr, png_bytep buffer, png_size_t size);
+void flush_png(char const* filename);
+
+G_BEGIN_DECLS
 
 static gboolean has_autovideo_sink = FALSE;
 static gboolean has_gtksink = FALSE;
@@ -46,7 +55,7 @@ gstreamer_plugin_check (void)
 		unsigned int i;
 		gboolean success = TRUE;
 
-		static char *plugins[] = {
+		static char const *plugins[] = {
 			"appsrc",
 			"videoconvert",
 			"videoflip",
@@ -239,39 +248,97 @@ arv_viewer_value_from_log (double value, double min, double max)
 	return pow (10.0, (value * (log10 (max) - log10 (min)) + log10 (min)));
 }
 
+static char*
+build_filename(){
+	GDateTime *date = g_date_time_new_now_local ();
+	char *date_string = g_date_time_format (date, "%Y-%m-%d-%H:%M:%S");
+	int microseconds = g_date_time_get_microsecond (date);
+	char *filename = g_strdup_printf ("%s.%03d.png",
+		date_string, microseconds / 1000);
+	char *path = g_build_filename (g_get_user_special_dir (G_USER_DIRECTORY_PICTURES),
+		"Aravis", filename, NULL);
+	g_free (filename);
+	g_free (date_string);
+	g_date_time_unref (date);
+	return path;
+}
+
+void flush_dummy(png_structp png_ptr){}
+
+static atomic_bool save_images = 0;
+
+static void
+png_out(char *filename, char const *data, int byte_per_pixel, int width, int height){
+	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if(!png) return;
+
+	png_infop info = png_create_info_struct(png);
+	if(!info) return;
+
+	if(setjmp(png_jmpbuf(png))) return;
+
+	png_bytep* row_pointers = (png_bytep*) malloc(sizeof(png_bytep) * height);
+	if(!row_pointers) return;
+	for (int y=0; y<height; y++){
+		row_pointers[y] = (png_byte*)data + y * width * byte_per_pixel;
+	}
+
+	png_set_IHDR(
+		png,
+		info,
+		width, height,
+		byte_per_pixel * 8,
+		PNG_COLOR_TYPE_GRAY,
+		PNG_INTERLACE_NONE,
+		PNG_COMPRESSION_TYPE_DEFAULT,
+		PNG_FILTER_TYPE_DEFAULT
+	);
+	png_set_rows(png, info, row_pointers);
+	png_set_write_fn(png, NULL, output_png, flush_dummy);
+
+	png_write_info(png, info);
+	png_write_image(png, row_pointers);
+	png_write_end(png, NULL);
+	flush_png(save_images ? filename : NULL);
+
+	free(row_pointers);
+}
+
+
 static GstBuffer *
 arv_to_gst_buffer (ArvBuffer *arv_buffer)
 {
 	GstBuffer *buffer;
-	int arv_row_stride;
 	int width, height;
 	char *buffer_data;
 	size_t buffer_size;
 
 	buffer_data = (char *) arv_buffer_get_data (arv_buffer, &buffer_size);
 	arv_buffer_get_image_region (arv_buffer, NULL, NULL, &width, &height);
-	arv_row_stride = width * ARV_PIXEL_FORMAT_BIT_PER_PIXEL (arv_buffer_get_image_pixel_format (arv_buffer)) / 8;
+
+	int byte_per_pixel = ARV_PIXEL_FORMAT_BIT_PER_PIXEL(arv_buffer_get_image_pixel_format (arv_buffer)) / 8;
+
+	char *path = build_filename();
+	png_out(path, buffer_data, byte_per_pixel, width, height);
+
 
 	/* Gstreamer requires row stride to be a multiple of 4 */
+	int arv_row_stride = width * byte_per_pixel;
 	if ((arv_row_stride & 0x3) != 0) {
-		int gst_row_stride;
-		size_t size;
-		void *data;
-		int i;
+		int gst_row_stride = (arv_row_stride & ~(0x3)) + 4;
 
-		gst_row_stride = (arv_row_stride & ~(0x3)) + 4;
+		size_t size = height * gst_row_stride;
+		void *data = g_malloc (size);
 
-		size = height * gst_row_stride;
-		data = g_malloc (size);
-
-		for (i = 0; i < height; i++)
-			memcpy (((char *) data) + i * gst_row_stride, buffer_data + i * arv_row_stride, arv_row_stride);
+		for (int y = 0; y < height; y++){
+			memcpy (((char *) data) + y * gst_row_stride, buffer_data + y * arv_row_stride, arv_row_stride);
+		}
 
 		buffer = gst_buffer_new_wrapped (data, size);
 	} else {
 		buffer = gst_buffer_new_wrapped_full (GST_MEMORY_FLAG_READONLY,
-						      buffer_data, buffer_size,
-						      0, buffer_size, NULL, NULL);
+							buffer_data, buffer_size,
+							0, buffer_size, NULL, NULL);
 	}
 
 	GST_BUFFER_DTS (buffer) = 0;
@@ -395,7 +462,7 @@ gain_scale_cb (GtkRange *range, ArvViewer *viewer)
 gboolean
 update_exposure_cb (void *data)
 {
-	ArvViewer *viewer = data;
+	ArvViewer *viewer = (ArvViewer*)data;
 	double exposure;
 	double log_exposure;
 
@@ -440,7 +507,7 @@ auto_exposure_cb (GtkToggleButton *toggle, ArvViewer *viewer)
 static gboolean
 update_gain_cb (void *data)
 {
-	ArvViewer *viewer = data;
+	ArvViewer *viewer = (ArvViewer*)data;
 	double gain;
 
 	gain = arv_camera_get_gain (viewer->camera);
@@ -483,57 +550,9 @@ auto_gain_cb (GtkToggleButton *toggle, ArvViewer *viewer)
 }
 
 void
-snapshot_cb (GtkButton *button, ArvViewer *viewer)
+snapshot_cb (GtkToggleButton *toggle, ArvViewer *viewer)
 {
-	GFile *file;
-	char *path;
-	char *filename;
-	GDateTime *date;
-	char *date_string;
-	int width, height;
-	const char *data;
-	const char *pixel_format;
-	size_t size;
-
-	g_return_if_fail (ARV_IS_CAMERA (viewer->camera));
-	g_return_if_fail (ARV_IS_BUFFER (viewer->last_buffer));
-
-	pixel_format = arv_camera_get_pixel_format_as_string (viewer->camera);
-	arv_buffer_get_image_region (viewer->last_buffer, NULL, NULL, &width, &height);
-	data = arv_buffer_get_data (viewer->last_buffer, &size);
-
-	path = g_build_filename (g_get_user_special_dir (G_USER_DIRECTORY_PICTURES),
-					 "Aravis", NULL);
-	file = g_file_new_for_path (path);
-	g_free (path);
-	g_file_make_directory (file, NULL, NULL);
-	g_object_unref (file);
-
-	date = g_date_time_new_now_local ();
-	date_string = g_date_time_format (date, "%Y-%m-%d-%H:%M:%S");
-	filename = g_strdup_printf ("%s-%s-%d-%d-%s-%s.raw",
-				    arv_camera_get_vendor_name (viewer->camera),
-				    arv_camera_get_device_id (viewer->camera),
-				    width,
-				    height,
-				    pixel_format != NULL ? pixel_format : "Unknown",
-				    date_string);
-	path = g_build_filename (g_get_user_special_dir (G_USER_DIRECTORY_PICTURES),
-				 "Aravis", filename, NULL);
-	g_file_set_contents (path, data, size, NULL);
-
-	if (viewer->notification) {
-		notify_notification_update (viewer->notification,
-					    "Snapshot saved to Image folder",
-					    path,
-					    "gtk-save");
-		notify_notification_show (viewer->notification, NULL);
-	}
-
-	g_free (path);
-	g_free (filename);
-	g_free (date_string);
-	g_date_time_unref (date);
+	save_images = gtk_toggle_button_get_active (toggle);
 }
 
 static void
@@ -699,7 +718,7 @@ update_device_list_cb (GtkToolButton *button, ArvViewer *viewer)
 static void
 remove_widget (GtkWidget *widget, gpointer data)
 {
-	gtk_container_remove (data, widget);
+	gtk_container_remove ((GtkContainer *)data, widget);
 	g_object_unref (widget);
 }
 
@@ -725,7 +744,7 @@ stop_video (ArvViewer *viewer)
 static GstBusSyncReply
 bus_sync_handler (GstBus *bus, GstMessage *message, gpointer user_data)
 {
-	ArvViewer *viewer = user_data;
+	ArvViewer *viewer = (ArvViewer*)user_data;
 
 	if (!gst_is_video_overlay_prepare_window_handle_message(message))
 		return GST_BUS_PASS;
@@ -950,7 +969,7 @@ start_video (ArvViewer *viewer)
 static gboolean
 select_camera_list_mode (gpointer user_data)
 {
-	ArvViewer *viewer = user_data;
+	ArvViewer *viewer = (ArvViewer*)user_data;
 
 	select_mode (viewer, ARV_VIEWER_MODE_CAMERA_LIST);
 	update_device_list_cb (GTK_TOOL_BUTTON (viewer->refresh_button), viewer);
@@ -1262,7 +1281,7 @@ arv_viewer_new (void)
 
   g_set_application_name ("ArvViewer");
 
-  arv_viewer = g_object_new (arv_viewer_get_type (),
+  arv_viewer = (ArvViewer*)g_object_new ((GType)arv_viewer_get_type (),
 			     "application-id", "org.aravis.ArvViewer",
 			     "flags", G_APPLICATION_NON_UNIQUE,
 			     "inactivity-timeout", 30000,
@@ -1283,10 +1302,10 @@ arv_viewer_init (ArvViewer *viewer)
 }
 
 static void
-arv_viewer_class_init (ArvViewerClass *class)
+arv_viewer_class_init (ArvViewerClass *viewer_class)
 {
-  GApplicationClass *application_class = G_APPLICATION_CLASS (class);
-  GObjectClass *object_class = G_OBJECT_CLASS (class);
+  GApplicationClass *application_class = G_APPLICATION_CLASS (viewer_class);
+  GObjectClass *object_class = G_OBJECT_CLASS (viewer_class);
 
   object_class->finalize = finalize;
 
@@ -1294,3 +1313,5 @@ arv_viewer_class_init (ArvViewerClass *class)
   application_class->shutdown = shutdown;
   application_class->activate = activate;
 }
+
+G_END_DECLS

@@ -5,6 +5,8 @@ include $(top_srcdir)/Makefile.decl
 SUBDIRS = data
 
 AM_CPPFLAGS = \
+	-std=c++14 \
+	-stdlib=libc++ \
 	-I$(top_srcdir)/src \
 	-DPACKAGE_LOCALE_DIR=\""$(prefix)/$(DATADIRNAME)/locale"\" \
 	-DPACKAGE_SRC_DIR=\""$(srcdir)"\" \
@@ -17,8 +19,8 @@ AM_CFLAGS = -Wall
 bin_PROGRAMS = arv-viewer
 
 arv_viewer_SOURCES =			\
-	main.c				\
-	arvviewer.c			\
+	main.cpp			\
+	arvviewer.cpp			\
 	arvviewertypes.h		\
 	arvviewer.h
 

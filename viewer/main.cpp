@@ -28,12 +28,101 @@
 #include <stdlib.h>
 #include <libnotify/notify.h>
 #include <libintl.h>
+#include <http/server_server.hpp>
+#include <http/server_file_request_handler.hpp>
+#include <http/server_lambda_request_handler.hpp>
+#include <http/websocket_server_request_handler.hpp>
+#include <http/websocket_server_service.hpp>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+
+
+namespace aravis_viewer{
+
+
+	struct service: http::websocket::server::service{};
+
+	class request_handler: public http::server::lambda_request_handler{
+	public:
+		request_handler();
+
+		std::shared_ptr< aravis_viewer::service > service(){
+			return websocket_service_;
+		}
+
+	private:
+		/// \brief The WebSocket-Service
+		std::shared_ptr< aravis_viewer::service > websocket_service_;
+
+		/// \brief Handler for Websocket-Requests
+		http::websocket::server::request_handler websocket_handler_;
+
+		/// \brief Handler for normal HTTP-File-Requests
+		http::server::file_request_handler http_file_handler_;
+	};
+
+
+	request_handler::request_handler() :
+		http::server::lambda_request_handler(
+			[this](
+				http::server::connection_ptr connection,
+				http::request const& req,
+				http::reply& rep
+			){
+				return
+					websocket_handler_.handle_request(connection, req, rep) ||
+					http_file_handler_.handle_request(connection, req, rep);
+			},
+			[this]{
+				websocket_handler_.shutdown();
+			}
+		),
+		websocket_service_(std::make_shared< aravis_viewer::service >()),
+		http_file_handler_(".")
+	{
+		websocket_handler_.register_service("scheduler", websocket_service_);
+	}
+
+
+}
+
+G_BEGIN_DECLS
 
 static char *arv_viewer_option_debug_domains = NULL;
 static gboolean arv_viewer_option_auto_socket_buffer = FALSE;
 static gboolean arv_viewer_option_no_packet_resend = FALSE;
 static unsigned int arv_viewer_option_packet_timeout = 20;
 static unsigned int arv_viewer_option_frame_retention = 100;
+
+G_END_DECLS
+
+
+std::shared_ptr< aravis_viewer::service > sender;
+
+std::size_t frame_devide_count = 0;
+std::ostringstream png_os(std::ios::out | std::ios::binary);
+
+void output_png(png_structp png_ptr, png_bytep buffer, png_size_t size){
+	png_os.write(reinterpret_cast< char const* >(buffer), size);
+}
+
+void flush_png(char const* filename){
+	auto str = png_os.str();
+	png_os.str("");
+	png_os.clear();
+
+	if(sender && frame_devide_count++ == 5){
+		frame_devide_count = 0;
+		sender->send_binary(str);
+	}
+
+	if(filename){
+		std::ofstream os(filename, std::ios::out | std::ios::binary);
+		os.write(str.data(), str.size());
+	}
+}
+
 
 static const GOptionEntry arv_viewer_option_entries[] =
 {
@@ -63,6 +152,12 @@ static const GOptionEntry arv_viewer_option_entries[] =
 int
 main (int argc, char **argv)
 {
+	auto handler = std::make_unique< aravis_viewer::request_handler >();
+	sender = handler->service();
+
+	http::server::server server("8090", std::move(handler), 1);
+
+
 	ArvViewer *viewer;
 	int status;
 	GOptionContext *context;

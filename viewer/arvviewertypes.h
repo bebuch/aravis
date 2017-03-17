@@ -26,10 +26,12 @@
 #include <glib-object.h>
 #include <arvconfig.h>
 
+
 G_BEGIN_DECLS
 
 typedef struct	_ArvViewer	ArvViewer;
 
 G_END_DECLS
+
 
 #endif
