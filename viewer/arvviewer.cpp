@@ -31,8 +31,8 @@
 #include <libnotify/notify.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdatomic.h>
 #include <png.h>
+#include <atomic>
 
 void output_png(png_structp png_ptr, png_bytep buffer, png_size_t size);
 void flush_png(char const* filename);
@@ -265,7 +265,7 @@ build_filename(){
 
 void flush_dummy(png_structp png_ptr){}
 
-static atomic_bool save_images = 0;
+static std::atomic_bool save_images(0);
 
 static void
 png_out(char *filename, char const *data, int byte_per_pixel, int width, int height){
