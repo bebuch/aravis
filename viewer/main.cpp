@@ -33,6 +33,8 @@
 #include <http/server_lambda_request_handler.hpp>
 #include <http/websocket_server_request_handler.hpp>
 #include <http/websocket_server_service.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <mutex>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -41,7 +43,38 @@
 namespace aravis_viewer{
 
 
-	struct service: http::websocket::server::service{};
+	class service: public http::websocket::server::service{
+	public:
+		void send(std::string const& img){
+			std::lock_guard< std::mutex > lock(mutex_);
+			for(auto& pair: ready_){
+				if(!pair.second) continue;
+				pair.second = false;
+				send_binary(img, pair.first);
+			}
+		}
+
+	private:
+		/// \brief Handle a new connection
+		void new_connection(http::server::connection_ptr const& connection){
+			ready_.emplace(connection, false);
+		}
+
+		/// \brief Handle a closed connection
+		void erase_connection(http::server::connection_ptr const& connection){
+			ready_.erase(connection);
+		}
+
+		/// \brief Handle a JSON message
+		void ready_connection(boost::property_tree::ptree const& data, http::server::connection_ptr const& connection)try{
+			if(!data.get< bool >("ready")) return;
+			std::lock_guard< std::mutex > lock(mutex_);
+			ready_.at(connection) = true;
+		}catch(...){}
+
+		std::mutex mutex_;
+		std::map< http::server::connection_ptr, bool > ready_;
+	};
 
 	class request_handler: public http::server::lambda_request_handler{
 	public:
@@ -100,7 +133,6 @@ G_END_DECLS
 
 std::shared_ptr< aravis_viewer::service > sender;
 
-std::size_t frame_devide_count = 0;
 std::ostringstream png_os(std::ios::out | std::ios::binary);
 
 void output_png(png_structp png_ptr, png_bytep buffer, png_size_t size){
@@ -112,9 +144,8 @@ void flush_png(char const* filename){
 	png_os.str("");
 	png_os.clear();
 
-	if(sender && frame_devide_count++ == 5){
-		frame_devide_count = 0;
-		sender->send_binary(str);
+	if(sender){
+		sender->send(str);
 	}
 
 	if(filename){

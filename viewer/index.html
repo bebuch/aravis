@@ -24,7 +24,11 @@
 					ctx.drawImage(img, 0, 0);
 				}
 				img.src = url;
+				socket.send(JSON.stringify({'ready': true}));
 			}
+		};
+		socket.onopen = function(){
+			socket.send(JSON.stringify({'ready': true}));
 		};
 	</script>
 </body>
