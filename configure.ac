@@ -170,7 +170,7 @@ fi
 AM_CONDITIONAL(ARAVIS_BUILD_VIEWER, test "x$build_viewer" = "xyes")
 
 # Standard math library doesn't come with a pkgconfig file.
-ARAVIS_VIEWER_LIBS="${ARAVIS_ADDITIONAL_LIBS} ${ARAVIS_VIEWER_LIBS} -L/media/data/libraries/src/boost/stage/lib -lboost_system -lboost_filesystem -lboost_thread -L/media/data/projekte/aravis/viewer/http/bin/clang-linux-4.0.0/release -lhttp -stdlib=libc++"
+ARAVIS_VIEWER_LIBS="${ARAVIS_ADDITIONAL_LIBS} ${ARAVIS_VIEWER_LIBS} -L/home/bebuch/media/libraries/src/boost/stage/lib -lboost_system -lboost_filesystem -lboost_thread -lhttp"
 
 AC_SUBST(ARAVIS_VIEWER_CFLAGS)
 AC_SUBST(ARAVIS_VIEWER_LIBS)
