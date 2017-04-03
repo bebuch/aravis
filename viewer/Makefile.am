@@ -7,6 +7,7 @@ SUBDIRS = data
 AM_CPPFLAGS = \
 	-std=c++14 \
 	-I$(top_srcdir)/src \
+	-I$(BOOST_ROOT) \
 	-DPACKAGE_LOCALE_DIR=\""$(prefix)/$(DATADIRNAME)/locale"\" \
 	-DPACKAGE_SRC_DIR=\""$(srcdir)"\" \
 	-DPACKAGE_DATA_DIR=\""$(datadir)"\" $(ARAVIS_VIEWER_CFLAGS) \
