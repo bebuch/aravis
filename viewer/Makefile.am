@@ -6,7 +6,6 @@ SUBDIRS = data
 
 AM_CPPFLAGS = \
 	-std=c++14 \
-	-stdlib=libc++ \
 	-I$(top_srcdir)/src \
 	-DPACKAGE_LOCALE_DIR=\""$(prefix)/$(DATADIRNAME)/locale"\" \
 	-DPACKAGE_SRC_DIR=\""$(srcdir)"\" \
